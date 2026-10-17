@@ -22,7 +22,11 @@ interface SocketContextType {
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const getSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_SOCKET_URL) return process.env.NEXT_PUBLIC_SOCKET_URL;
+  if (typeof window !== 'undefined') return window.location.origin;
+  return 'http://localhost:5001';
+};
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -31,7 +35,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { activeProject } = useProject();
 
   useEffect(() => {
-    const socketInstance = io(SOCKET_URL, {
+    const socketInstance = io(getSocketUrl(), {
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
