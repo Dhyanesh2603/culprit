@@ -8,8 +8,8 @@ const rootDir = path.resolve(__dirname, '..');
 const backendDir = path.join(rootDir, 'backend');
 const frontendDir = path.join(rootDir, 'frontend');
 
-const railwayPort = process.env.PORT || '3000';
-const backendPort = process.env.INTERNAL_BACKEND_PORT || '5001';
+const railwayPort = String(process.env.PORT || '5001');
+const backendPort = '4000'; // Dedicated internal port for Express API
 
 // Set fallback SQLite database if DATABASE_URL is not set
 if (!process.env.DATABASE_URL) {
@@ -86,11 +86,12 @@ function waitForBackendReady(port, maxAttempts = 30) {
 // 4. Launch Next.js frontend once backend is ready
 waitForBackendReady(backendPort).then(() => {
   console.log(`[Culprit Launcher] Launching Next.js frontend on public Railway PORT ${railwayPort}...`);
-  const frontendProcess = spawn('npx', ['next', 'start', '-p', railwayPort], {
+  const frontendProcess = spawn('npx', ['next', 'start', '-p', railwayPort, '-H', '0.0.0.0'], {
     cwd: frontendDir,
     env: {
       ...process.env,
       PORT: railwayPort,
+      HOSTNAME: '0.0.0.0',
       INTERNAL_BACKEND_URL: `http://127.0.0.1:${backendPort}`,
       NODE_ENV: 'production',
     },
