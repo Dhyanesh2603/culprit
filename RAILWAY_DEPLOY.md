@@ -1,90 +1,76 @@
 # Railway Deployment Guide
 
-This guide provides step-by-step instructions for deploying Culprit to Railway using a standard multi-service architecture (PostgreSQL + Express Backend + Next.js 15 Frontend).
+This repository supports two deployment modes on Railway:
+
+1. **Option 1: Unified Single-Service Deployment (Recommended / Default)**
+   Deploy the entire application (Next.js frontend + Express backend API + SQLite/Postgres database) in a single Railway service with zero configuration.
+2. **Option 2: Multi-Service Architecture**
+   Deploy backend and frontend as separate services within a Railway project canvas connected to a managed PostgreSQL database.
 
 ---
 
-## Architecture Overview on Railway
+## Option 1: Unified Single-Service Deployment (Fastest)
 
-Your Railway Project will contain three services created from this single repository:
+This mode runs the entire stack in one container. Next.js serves the frontend on Railway's public `PORT` and automatically proxies `/api/*`, `/socket.io/*`, and `/health` to the Express backend running on internal port 5001.
 
-```
-[Railway Project: Culprit]
-├── 1. PostgreSQL Database Service (Provisioned via Railway)
-├── 2. Backend Service (Root Directory: /backend)
-└── 3. Frontend Service (Root Directory: /frontend)
-```
-
----
-
-## Step 1: Create a Railway Project and Provision PostgreSQL
+### Steps:
 
 1. Log into your [Railway Dashboard](https://railway.app).
-2. Click **New Project**.
-3. Select **Provision PostgreSQL**.
-4. Railway will create a managed PostgreSQL instance and automatically expose a `DATABASE_URL` reference variable.
+2. Click **New Project** -> **Deploy from GitHub repo**.
+3. Select `Dhyanesh2603/culprit`.
+4. Railway will automatically detect Nixpacks, run `npm run build`, and start the stack via `node scripts/start-unified.js`.
+5. Under service **Settings** -> **Networking**, click **Generate Domain** (e.g. `culprit-production.up.railway.app`).
+6. (Optional) Under service **Variables**, you may attach a managed PostgreSQL database by setting `DATABASE_URL`. If omitted, Culprit automatically falls back to local SQLite with zero errors.
+
+### Healthcheck:
+Railway automatically monitors `/health`. Once healthy, visit your generated domain in your browser to use the application.
 
 ---
 
-## Step 2: Deploy the Backend Service
+## Option 2: Multi-Service Architecture
 
-1. Inside your Railway project canvas, click **+ New** -> **GitHub Repo**.
-2. Select your repository: `Dhyanesh2603/culprit`.
-3. Before deploying, click **Settings** for this newly added service:
-   - **Service Name:** Change to `culprit-backend`.
-   - **Root Directory:** Set to `/backend` (Important: do not leave as root).
-   - **Build Command:** `npm install && npm run build` (or leave default to use `backend/railway.json`).
-   - **Start Command:** `npm run start:railway` (or leave default to use `backend/railway.json`).
-4. Go to the **Variables** tab for the backend service and configure:
-   - `DATABASE_URL`: Click **Add Reference** and select the PostgreSQL `DATABASE_URL` from Step 1.
+For large teams requiring independent scaling for frontend and backend tiers:
+
+### Service 1: PostgreSQL Database
+1. In your Railway canvas, click **+ New** -> **Database** -> **Add PostgreSQL**.
+2. Railway creates a managed PostgreSQL instance and sets `DATABASE_URL`.
+
+### Service 2: Backend Service
+1. In your canvas, click **+ New** -> **GitHub Repo** -> select `Dhyanesh2603/culprit`.
+2. Under **Settings**:
+   - **Service Name:** `culprit-backend`
+   - **Root Directory:** `/backend`
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm run start:railway`
+3. Under **Variables**:
+   - `DATABASE_URL`: Reference the PostgreSQL `DATABASE_URL` from Service 1.
    - `NODE_ENV`: `production`
-   - `JWT_SECRET`: Generate a secure 32-character string.
-   - `GITHUB_WEBHOOK_SECRET`: Optional secret for GitHub webhooks.
-   - `CORS_ORIGIN`: `*` (or your frontend Railway domain once generated).
-5. Go to the **Networking** tab:
-   - Click **Generate Domain** (e.g. `culprit-backend-production.up.railway.app`).
-   - Copy this URL (you will need it for the frontend).
-6. Verify deployment by visiting: `https://<your-backend-domain>/health`. You should see `{"status":"UP"}`.
+   - `JWT_SECRET`: Secure 32-character secret key.
+   - `CORS_ORIGIN`: `*`
+4. Under **Networking**: Click **Generate Domain** and copy the domain.
+
+### Service 3: Frontend Service
+1. In your canvas, click **+ New** -> **GitHub Repo** -> select `Dhyanesh2603/culprit`.
+2. Under **Settings**:
+   - **Service Name:** `culprit-frontend`
+   - **Root Directory:** `/frontend`
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm start`
+3. Under **Variables**:
+   - `NEXT_PUBLIC_API_URL`: `https://<culprit-backend-domain>/api/v1`
+   - `NEXT_PUBLIC_SOCKET_URL`: `https://<culprit-backend-domain>`
+4. Under **Networking**: Click **Generate Domain** to access the web application.
 
 ---
 
-## Step 3: Deploy the Frontend Service
+## Environment Variables Reference
 
-1. Inside the same Railway project canvas, click **+ New** -> **GitHub Repo** again.
-2. Select the same repository: `Dhyanesh2603/culprit`.
-3. Click **Settings** for this second service:
-   - **Service Name:** Change to `culprit-frontend`.
-   - **Root Directory:** Set to `/frontend` (Important: do not leave as root).
-   - **Build Command:** `npm install && npm run build`.
-   - **Start Command:** `npm start`.
-4. Go to the **Variables** tab and configure:
-   - `NEXT_PUBLIC_API_URL`: `https://<your-backend-domain>/api/v1` (replace with backend domain from Step 2).
-   - `NEXT_PUBLIC_SOCKET_URL`: `https://<your-backend-domain>` (replace with backend domain from Step 2).
-   - `NODE_ENV`: `production`
-5. Go to the **Networking** tab:
-   - Click **Generate Domain** (e.g. `culprit-frontend-production.up.railway.app`).
-6. Open your frontend domain in the browser to access Culprit in production.
-
----
-
-## Automatic Database Migrations and Seeding
-
-The backend `start:railway` command executes:
-```bash
-node scripts/prepare-prisma.js && npx prisma db push --schema=prisma/schema.postgresql.prisma && tsx prisma/seed.ts && node dist/server.js
-```
-
-This guarantees that:
-- The PostgreSQL schema is pushed to the Railway database automatically on startup.
-- The default engineering dataset (services, users, sample deployments, and incidents) is seeded.
-- The server starts listening on Railway's assigned dynamic `PORT`.
-
----
-
-## Railway Configuration Files Reference
-
-This repository includes native Railway configuration files:
-- `backend/railway.json`: Declares Nixpacks build and deployment settings with automated healthcheck probes at `/health`.
-- `frontend/railway.json`: Declares Next.js 15 build and production start commands.
-- `railway.json`: Root monorepo fallback configuration.
-- `backend/scripts/prepare-prisma.js`: Detects PostgreSQL on Railway vs SQLite locally.
+| Variable | Description | Required | Default |
+| :--- | :--- | :--- | :--- |
+| `PORT` | Public port provided automatically by Railway | Automatic | `3000` |
+| `DATABASE_URL` | PostgreSQL connection string or SQLite file path | Optional | `file:./dev.db` |
+| `INTERNAL_BACKEND_PORT` | Internal port used by backend in unified mode | Optional | `5001` |
+| `JWT_SECRET` | Secret key used for signing JWT tokens | Optional | Default development key |
+| `GITHUB_WEBHOOK_SECRET` | Secret key used to verify GitHub webhook signatures | Optional | Demo secret |
+| `NEXT_PUBLIC_API_URL` | Explicit backend API URL (only needed for Option 2) | Optional | Auto-proxied to internal backend |
+| `NEXT_PUBLIC_SOCKET_URL` | Explicit Socket.IO URL (only needed for Option 2) | Optional | Auto-proxied to internal backend |
