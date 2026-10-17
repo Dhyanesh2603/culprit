@@ -1,0 +1,260 @@
+// PostgreSQL Production Prisma Schema for Who Broke The Build
+// Used in Docker Compose and cloud PostgreSQL instances
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  name         String
+  avatarUrl    String?
+  role         String             @default("DEVELOPER") // ADMIN, DEVELOPER, VIEWER
+  firebaseUid  String?            @unique
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  projectMembers ProjectMember[]
+  assignments    IncidentAssignment[]
+  comments       IncidentComment[]
+  createdIncidents Incident[]     @relation("IncidentCreator")
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+model Project {
+  id                       String          @id @default(cuid())
+  name                     String
+  slug                     String          @unique
+  description              String?
+  repositoryUrl            String
+  defaultBranch            String          @default("main")
+  environment              String          @default("production")
+  correlationWindowMinutes Int             @default(60)
+  webhookSecret            String?
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  members        ProjectMember[]
+  deployments    Deployment[]
+  commits        Commit[]
+  incidents      Incident[]
+  timelineEvents TimelineEvent[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  role      String   @default("DEVELOPER")
+  createdAt DateTime @default(now())
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model Deployment {
+  id              String          @id @default(cuid())
+  projectId       String
+  version         String
+  commitHash      String
+  branch          String          @default("main")
+  environment     String          @default("production")
+  developerEmail  String
+  developerName   String
+  status          String          @default("SUCCESS")
+  isRollback      Boolean         @default(false)
+  rollbackOfId    String?
+  rollbackReason  String?
+  notes           String?
+  occurredAt      DateTime
+  receivedAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commits         Commit[]
+  timelineEvents  TimelineEvent[]
+  suggestedByIncidents Incident[] @relation("SuggestedDeployment")
+
+  @@unique([projectId, version, environment])
+  @@index([projectId, occurredAt])
+  @@map("deployments")
+}
+
+model Commit {
+  id           String          @id @default(cuid())
+  projectId    String
+  commitHash   String
+  authorName   String
+  authorEmail  String
+  message      String
+  branch       String          @default("main")
+  filesChanged String          @default("[]")
+  additions    Int             @default(0)
+  deletions    Int             @default(0)
+  timestamp    DateTime
+  receivedAt   DateTime        @default(now())
+  deploymentId String?
+  createdAt    DateTime        @default(now())
+
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployment   Deployment?     @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+  timelineEvents TimelineEvent[]
+  suggestedByIncidents Incident[] @relation("SuggestedCommit")
+
+  @@unique([projectId, commitHash])
+  @@index([projectId, timestamp])
+  @@map("commits")
+}
+
+model Incident {
+  id                   String               @id @default(cuid())
+  incidentNumber       Int                  @default(1)
+  projectId            String
+  title                String
+  description          String
+  severity             String               @default("MEDIUM")
+  status               String               @default("OPEN")
+  creatorId            String?
+  rootCause            String?
+  resolution           String?
+  resolvedAt           DateTime?
+  occurredAt           DateTime
+  receivedAt           DateTime             @default(now())
+  suggestedDeploymentId String?
+  suggestedCommitId    String?
+  confidenceScore      Float?               @default(0.0)
+  correlationReason    String?
+  version              Int                  @default(1)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  project              Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator              User?                @relation("IncidentCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  suggestedDeployment  Deployment?          @relation("SuggestedDeployment", fields: [suggestedDeploymentId], references: [id], onDelete: SetNull)
+  suggestedCommit      Commit?              @relation("SuggestedCommit", fields: [suggestedCommitId], references: [id], onDelete: SetNull)
+  assignments          IncidentAssignment[]
+  comments             IncidentComment[]
+  timelineEvents       TimelineEvent[]
+  notifications        Notification[]
+
+  @@index([projectId, occurredAt])
+  @@index([projectId, status])
+  @@map("incidents")
+}
+
+model IncidentAssignment {
+  id         String   @id @default(cuid())
+  incidentId String
+  userId     String
+  assignedBy String?
+  createdAt  DateTime @default(now())
+
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([incidentId, userId])
+  @@map("incident_assignments")
+}
+
+model IncidentComment {
+  id             String   @id @default(cuid())
+  incidentId     String
+  userId         String
+  content        String
+  attachmentUrl  String?
+  attachmentName String?
+  mentions       String   @default("[]")
+  isStatusChange Boolean  @default(false)
+  previousStatus String?
+  newStatus      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  incident       Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId, createdAt])
+  @@map("incident_comments")
+}
+
+model TimelineEvent {
+  id           String      @id @default(cuid())
+  projectId    String
+  incidentId   String?
+  deploymentId String?
+  commitId     String?
+  eventType    String
+  title        String
+  description  String?
+  metadata     String?     @default("{}")
+  actorEmail   String?
+  actorName    String?
+  occurredAt   DateTime
+  receivedAt   DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  incident     Incident?   @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  deployment   Deployment? @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+  commit       Commit?     @relation(fields: [commitId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, occurredAt])
+  @@map("timeline_events")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  projectId   String?
+  userId      String?
+  userEmail   String?
+  action      String
+  entityType  String
+  entityId    String
+  beforeState String?
+  afterState  String?
+  ipAddress   String?
+  userAgent   String?
+  occurredAt  DateTime @default(now())
+
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, occurredAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  projectId  String?
+  incidentId String?
+  title      String
+  message    String
+  type       String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  incident   Incident?@relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
