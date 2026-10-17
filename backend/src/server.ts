@@ -11,7 +11,7 @@ async function bootstrap() {
   // Initialize Real-time Socket.IO Server
   initializeSocketIO(server);
 
-  server.listen(ENV.PORT, () => {
+  server.listen(ENV.PORT, '0.0.0.0', () => {
     logger.info(`=======================================================`);
     logger.info(` WHO BROKE THE BUILD? - Real-time Incident Server`);
     logger.info(` Environment: ${ENV.NODE_ENV}`);
